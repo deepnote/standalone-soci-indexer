@@ -68,7 +68,7 @@ func Init(ctx context.Context, registryUrl string, authToken string) (*Registry,
 			},
 		}
 		log.Info(ctx, "Using auth token "+authToken)
-	} else if isEcrRegistry(registryUrl) {
+	} else if isEcrRegistry(registryUrl) || isEcrPublicRegistry(registryUrl) {
 		err := authorizeEcr(registry)
 		if err != nil {
 			return nil, err
@@ -225,6 +225,16 @@ func (registry *Registry) GetImageDigests(ctx context.Context, repositoryName st
 // Check if a registry is an ECR registry
 func isEcrRegistry(registryUrl string) bool {
 	ecrRegistryUrlRegex := "\\d{12}\\.dkr\\.ecr\\.\\S+\\.amazonaws\\.com"
+	match, err := regexp.MatchString(ecrRegistryUrlRegex, registryUrl)
+	if err != nil {
+		panic(err)
+	}
+	return match
+}
+
+// Check if a registry is a public ECR registry
+func isEcrPublicRegistry(registryUrl string) bool {
+	ecrRegistryUrlRegex := "public\\.ecr\\.aws"
 	match, err := regexp.MatchString(ecrRegistryUrlRegex, registryUrl)
 	if err != nil {
 		panic(err)
