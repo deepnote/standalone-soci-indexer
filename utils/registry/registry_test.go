@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
+	"oras.land/oras-go/v2/registry/remote"
 )
 
 type ExpectedResponse struct {
@@ -17,10 +18,11 @@ type ExpectedResponse struct {
 
 func TestHeadManifest(t *testing.T) {
 	doTest := func(registryUrl string, repository string, digestOrTag string, expected ExpectedResponse) {
-		registry, err := Init(context.Background(), registryUrl, "")
+		remote_registry, err := remote.NewRegistry(registryUrl)
 		if err != nil {
 			panic(err)
 		}
+		registry := &Registry{remote_registry}
 
 		descriptor, err := registry.HeadManifest(context.Background(), repository, digestOrTag)
 		if err != nil {

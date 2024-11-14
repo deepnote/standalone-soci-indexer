@@ -20,6 +20,7 @@ import (
 	"oras.land/oras-go/v2/registry/remote/auth"
 
 	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/ecr"
 	"github.com/awslabs/soci-snapshotter/soci/store"
@@ -69,9 +70,48 @@ func Init(ctx context.Context, registryUrl string, authToken string) (*Registry,
 		}
 		log.Info(ctx, "Using auth token "+authToken)
 	} else if isEcrRegistry(registryUrl) || isEcrPublicRegistry(registryUrl) {
-		err := authorizeEcr(registry)
-		if err != nil {
-			return nil, err
+		registry.RepositoryOptions.Client = &auth.Client{
+			// Header: http.Header{
+			// 	"Authorization": {"Basic " + *ecrAuthorizationToken},
+			// 	"User-Agent":    {"Standalone SOCI Index Builder (oras-go)"},
+			// },
+			Credential: func(ctx context.Context, hostport string) (auth.Credential, error) {
+				// getting ecr auth token
+				input := &ecr.GetAuthorizationTokenInput{}
+				var ecrClient *ecr.ECR
+				ecrEndpoint := os.Getenv("ECR_ENDPOINT") // set this env var for custom, i.e. non default, aws ecr endpoint
+				aws_region := os.Getenv("AWS_REGION")
+				if aws_region == "" {
+					aws_region = "us-east-1"
+				}
+				if ecrEndpoint != "" {
+					ecrClient = ecr.New(session.New(&aws.Config{Endpoint: aws.String(ecrEndpoint), Region: aws.String(aws_region)}))
+				} else {
+					ecrClient = ecr.New(session.New(&aws.Config{Region: aws.String(aws_region)}))
+				}
+				getAuthorizationTokenResponse, err := ecrClient.GetAuthorizationToken(input)
+				if err != nil {
+					if err == credentials.ErrNoValidProvidersFoundInChain {
+						log.Info(ctx, "No valid providers found in chain, continue with empty credentials")
+						return auth.EmptyCredential, nil
+					}
+					return auth.Credential{}, err
+				}
+
+				if len(getAuthorizationTokenResponse.AuthorizationData) == 0 {
+					return auth.Credential{}, errors.New("couldn't authorize with ECR: empty authorization data returned")
+				}
+
+				ecrAuthorizationToken := getAuthorizationTokenResponse.AuthorizationData[0].AuthorizationToken
+				if len(*ecrAuthorizationToken) == 0 {
+					return auth.Credential{}, errors.New("couldn't authorize with ECR: empty authorization token returned")
+				}
+
+				return auth.Credential{
+					Username: "AWS",
+					Password: *ecrAuthorizationToken,
+				}, nil
+			},
 		}
 	}
 	return &Registry{registry}, nil
@@ -240,38 +280,4 @@ func isEcrPublicRegistry(registryUrl string) bool {
 		panic(err)
 	}
 	return match
-}
-
-// Authorize ECR registry
-func authorizeEcr(ecrRegistry *remote.Registry) error {
-	// getting ecr auth token
-	input := &ecr.GetAuthorizationTokenInput{}
-	var ecrClient *ecr.ECR
-	ecrEndpoint := os.Getenv("ECR_ENDPOINT") // set this env var for custom, i.e. non default, aws ecr endpoint
-	if ecrEndpoint != "" {
-		ecrClient = ecr.New(session.New(&aws.Config{Endpoint: aws.String(ecrEndpoint)}))
-	} else {
-		ecrClient = ecr.New(session.New())
-	}
-	getAuthorizationTokenResponse, err := ecrClient.GetAuthorizationToken(input)
-	if err != nil {
-		return err
-	}
-
-	if len(getAuthorizationTokenResponse.AuthorizationData) == 0 {
-		return errors.New("Couldn't authorize with ECR: empty authorization data returned")
-	}
-
-	ecrAuthorizationToken := getAuthorizationTokenResponse.AuthorizationData[0].AuthorizationToken
-	if len(*ecrAuthorizationToken) == 0 {
-		return errors.New("Couldn't authorize with ECR: empty authorization token returned")
-	}
-
-	ecrRegistry.RepositoryOptions.Client = &auth.Client{
-		Header: http.Header{
-			"Authorization": {"Basic " + *ecrAuthorizationToken},
-			"User-Agent":    {"Standalone SOCI Index Builder (oras-go)"},
-		},
-	}
-	return nil
 }
