@@ -64,7 +64,7 @@ func Init(ctx context.Context, registryUrl string, authToken string) (*Registry,
 	if authToken != "" {
 		registry.RepositoryOptions.Client = &auth.Client{
 			Header: http.Header{
-				"Authorization": {"Basic " + base64.StdEncoding.EncodeToString([]byte(authToken))},
+				"Authorization": {"Bearer " + base64.StdEncoding.EncodeToString([]byte(authToken))},
 				"User-Agent":    {"Standalone SOCI Index Builder (oras-go)"},
 			},
 		}
